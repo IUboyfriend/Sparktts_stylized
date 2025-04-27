@@ -49,7 +49,7 @@ def main():
     # 以上为必需参数
     parser.add_argument('--num_heads', type=int, default=96, help='K, number of top heads to intervene on')
     parser.add_argument('--alpha', type=float, default=5, help='alpha, intervention strength')
-    parser.add_argument('--val_ratio', type=float, help='ratio of validation set size to development set size', default=0.2)
+    parser.add_argument('--val_ratio', type=float, help='ratio of validation set size to development set size', default=0.8)
     parser.add_argument('--use_center_of_mass', action='store_true', help='use center of mass direction', default=False)
     parser.add_argument('--use_random_dir', action='store_true', help='use random direction', default=False)
     parser.add_argument('--collaborative_selection', action='store_true', help='use collaborative selection', default=False)
@@ -92,7 +92,7 @@ def main():
     # print(head_wise_activations.shape)
     
     dataset_len = head_wise_activations.shape[0] // 2 # 1132
-    # print(dataset_len) 
+    print(dataset_len) 
 
     # tuning dataset: no labels used, just to get std of activations along the direction
     tuning_activations = np.load(f"{args.activation_path}")
@@ -100,14 +100,19 @@ def main():
     tuning_labels = np.load(f"{args.label_path}")
 
 
-    separated_head_wise_activations, separated_labels, idxs_to_split_at = get_separated_activations(labels, head_wise_activations)
-
+    separated_head_wise_activations, separated_labels, idxs_to_split_at = get_separated_activations(labels, head_wise_activations) 
+    # list, each (2, num_layers, num_heads, head_dim)
+    
+    
+    print(dataset_len)
     train_idxs = np.arange(dataset_len)
+    print(train_idxs.shape)
 
     # pick a val set using numpy
     train_set_idxs = np.random.choice(train_idxs, size=int(len(train_idxs)*(1-args.val_ratio)), replace=False)
     val_set_idxs = np.array([x for x in train_idxs if x not in train_set_idxs])
-    print(len(val_set_idxs))
+    print(train_set_idxs.shape) #905
+    print(val_set_idxs.shape) #227
 
     print("getting top heads")
     # get directions
@@ -205,9 +210,9 @@ def main():
     np.save(os.path.join(args.save_dir, f'probes_{args.num_heads}_{args.alpha:.1f}.npy'),probes)
     np.save(os.path.join(args.save_dir, f'top_heads_{args.num_heads}_{args.alpha:.1f}.npy'),top_heads)
 
-    # 这里的interventions中得到的intervention向量实际上没有用到
+    # 这里的interventions中得到的intervention向量实际上没有用到, only used for recording the selected heads
     interventions = get_interventions_dict(top_heads, probes, tuning_activations, num_heads, args.use_center_of_mass, args.use_random_dir, com_directions)
-
+    print(interventions)
     # print selected layers and heads
     for intervention in sorted(interventions.keys(), key=lambda x: int(x.split('.')[2])):
         print(intervention)
@@ -219,6 +224,7 @@ def main():
     activations_dict = {} # save
     for head_out_name, list_int_vec in tqdm(interventions.items()):
         layer_no = int(head_out_name.split('.')[2])
+        print(layer_no)
         displacement = np.zeros((int(num_heads), int(model.config.hidden_size / num_heads)))
         activations_dict[layer_no] = {} # save
         for head_no, head_vec, std in list_int_vec:
@@ -226,6 +232,8 @@ def main():
             activations = tuning_activations[:,layer_no,head_no,:]
             correct_activations = activations[::2, :]
             incorrect_activations = activations[1::2, :]
+            # print(correct_activations.shape)
+            print(incorrect_activations.shape) # (1132, 64)
             correct_activations = np.mean(correct_activations, axis=0)
             incorrect_activations = np.mean(incorrect_activations, axis=0)
             # 真正用到的intervention向量在这里计算
@@ -236,7 +244,7 @@ def main():
         device = model.model.layers[layer_no].self_attn.o_proj.weight.device.index
         displacement = torch.tensor(rearrange(displacement, 'h d -> (h d)'), device=device)
         # FIXME: 原本的o_proj.bias中，没有被选中的heads的bias被覆盖为0; 还是说本身就为零？
-        bias_tobe = F.linear(displacement.to(torch.float16), model.model.layers[layer_no].self_attn.o_proj.weight).to(device)
+        bias_tobe = F.linear(displacement.to(torch.float32), model.model.layers[layer_no].self_attn.o_proj.weight).to(device)
         model.model.layers[layer_no].self_attn.o_proj.bias = torch.nn.parameter.Parameter(bias_tobe)
     with open(os.path.join(args.save_dir, f'activations_{args.num_heads}_{args.alpha:.1f}.pkl'), 'wb') as f:
         pickle.dump(activations_dict, f)
