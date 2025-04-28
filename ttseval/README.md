@@ -9,9 +9,7 @@
 - [环境要求](#环境要求)
 - [文件结构](#文件结构)
 - [快速开始](#快速开始)
-- [配置说明](#配置说明)
 - [注意事项](#注意事项)
-- [更新日志](#更新日志)
 
 ---
 
@@ -64,14 +62,6 @@ cat eval_results/evaluation_results.json      # 查看每条明细
 
 ---
 
-## 配置说明
-| 参数 | 默认值 | 说明 |
-|-------|---------|-----|
-| `SAMPLE_RATE` | **16000** | 输入/输出统一采样率 |
-| `DEVICE` | 自动检测 | 优先使用 GPU (`cuda`) |
-| `BATCH_SIZE` | **8** | 批次大小，显存越大可调越高 |
-| `RESULT_JSON` | `eval_results/evaluation_results.json` | 结果输出路径 |
-| Whisper 模型 | `openai/whisper-medium` | 可替换为 small/large 以权衡速度/精度 |
 
 ---
 
@@ -82,18 +72,6 @@ cat eval_results/evaluation_results.json      # 查看每条明细
 4. STOI 对语速/节奏敏感，如非完全对齐场景可跳过。
 
 ---
-
-## 更新日志
-| 版本 | 变更 |
-|------|------|
-| **v1.0** | 单条推理，Whisper‑Large‑V3 |
-| **v2.0** | 改用 Whisper‑Medium，支持批量推理 |
-| **v2.1** | 新增缓存管理 & `FutureWarning` 静音处理 |
-
-
-
-
-
 
 
 
