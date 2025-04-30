@@ -708,7 +708,7 @@ def train_probes(seed, train_set_idxs, val_set_idxs, separated_head_wise_activat
             X_val = all_X_val[:,layer,head,:]
     
             # clf = LogisticRegression(random_state=seed, max_iter=1000,C=1e-8).fit(X_train, y_train)
-            clf = LogisticRegression(random_state=seed, max_iter=1000, penalty='l1', solver='liblinear',C=5e-3).fit(X_train, y_train)
+            clf = LogisticRegression(random_state=seed, max_iter=1000, penalty='l1', solver='liblinear',C=1e-2).fit(X_train, y_train)
             y_pred = clf.predict(X_train)
             y_val_pred = clf.predict(X_val)
             all_head_accs.append(accuracy_score(y_val, y_val_pred))
@@ -916,6 +916,8 @@ def get_top_heads(train_idxs, val_idxs, separated_activations, separated_labels,
                 print(f"Layer {layer}, Head {head}: Validation accuracy = {val_acc:.4f}")
     
     return top_heads, probes
+
+
 
 # def get_top_heads_heuristic(
 #     train_idxs,
@@ -1649,3 +1651,28 @@ def get_com_directions(num_layers, num_heads, train_set_idxs, val_set_idxs, sepa
     com_directions = np.array(com_directions)
 
     return com_directions
+
+
+def get_activations(model, tokens, use_cache=False, past_key_values=None): 
+    """get activations of all heads in all layers"""
+    ckpts = [f"model.layers.{i}.self_attn.o_proj"
+             for i in range(model.config.num_hidden_layers)]
+    if past_key_values is not None:
+        assert use_cache, "if use past_key_values, use_cache should be True"
+    with torch.no_grad():
+        tokens = tokens.to(model.device)
+        with TraceDict(model, ckpts, retain_input=True) as ret:
+            outputs = model(
+                tokens,
+                use_cache=use_cache,
+                past_key_values=past_key_values
+            )
+        new_past_key_values = outputs.past_key_values if use_cache else None
+
+        head_wise_hidden_states = [ret[ckpt].input.detach() for ckpt in ckpts]
+        # squeeze to remove the batch dimension if batch size is 1
+        head_wise_hidden_states = torch.stack(head_wise_hidden_states, dim=0).squeeze(dim=1)
+        # print(head_wise_hidden_states.shape)
+    # head_wise_hidden_states: [num_layers, seq_len, num_heads * head_dim]
+    # new_past_key_values: kv cache for next forward
+    return head_wise_hidden_states, new_past_key_values

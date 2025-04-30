@@ -1,4 +1,4 @@
-# python edit_weight.py --model_name Qwen2.5-0.5B --activation_path "activations/SparkTTS_head_wise.npy" --label_path "activations/SparkTTS_labels.npy" --model_dir "../pretrained_models/Spark-TTS-0.5B" --num_heads 64 --alpha 3 --save_dir "edited_weights/" --selection_method "linear_probing"
+# python edit_weight.py --model_name Qwen2.5-0.5B --activation_path "activations/SparkTTS_head_wise.npy" --model_dir "../pretrained_models/Spark-TTS-0.5B" --num_heads 64 --alpha 3 --save_dir "edited_weights/" --selection_method "linear_probing"
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,13 +43,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, default='Qwen2.5-0.5B', help='model name')
     parser.add_argument("--activation_path", type=str, default=None, help='activation path')
-    parser.add_argument("--label_path", type=str, default=None, help='label path')
     parser.add_argument("--model_dir", type=str, default=None, help='local directory with model data')
     parser.add_argument("--save_dir", type=str, default="edited_model", help='directory to save the edited model')
     # 以上为必需参数
     parser.add_argument('--num_heads', type=int, default=96, help='K, number of top heads to intervene on')
     parser.add_argument('--alpha', type=float, default=5, help='alpha, intervention strength')
-    parser.add_argument('--val_ratio', type=float, help='ratio of validation set size to development set size', default=0.8)
+    parser.add_argument('--val_ratio', type=float, help='ratio of validation set size to development set size', default=0.2)
     parser.add_argument('--use_center_of_mass', action='store_true', help='use center of mass direction', default=False)
     parser.add_argument('--use_random_dir', action='store_true', help='use random direction', default=False)
     parser.add_argument('--collaborative_selection', action='store_true', help='use collaborative selection', default=False)
@@ -87,7 +86,11 @@ def main():
     # load activations 
     print("load activations")
     head_wise_activations = np.load(f"{args.activation_path}")
-    labels = np.load(f"{args.label_path}")
+    length = len(head_wise_activations)
+    labels = []
+    for i in range(length):
+        labels.append(1 if i % 2 == 0 else 0)
+
     head_wise_activations = rearrange(head_wise_activations, 'b l (h d) -> b l h d', h = num_heads) # (2264, 24, 14, 64)
     # print(head_wise_activations.shape)
     
@@ -97,7 +100,6 @@ def main():
     # tuning dataset: no labels used, just to get std of activations along the direction
     tuning_activations = np.load(f"{args.activation_path}")
     tuning_activations = rearrange(tuning_activations, 'b l (h d) -> b l h d', h = num_heads)
-    tuning_labels = np.load(f"{args.label_path}")
 
 
     separated_head_wise_activations, separated_labels, idxs_to_split_at = get_separated_activations(labels, head_wise_activations) 
@@ -208,6 +210,7 @@ def main():
 
     os.makedirs(args.save_dir, exist_ok=True)
     np.save(os.path.join(args.save_dir, f'probes_{args.num_heads}_{args.alpha:.1f}.npy'),probes)
+    # print(top_heads)
     np.save(os.path.join(args.save_dir, f'top_heads_{args.num_heads}_{args.alpha:.1f}.npy'),top_heads)
 
     # 这里的interventions中得到的intervention向量实际上没有用到, only used for recording the selected heads

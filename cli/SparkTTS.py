@@ -211,6 +211,7 @@ class SparkTTS:
 
         # Decode the generated tokens into text
         predicts = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        # print(predicts)
 
         # Extract semantic token IDs from the generated text
         pred_semantic_ids = (

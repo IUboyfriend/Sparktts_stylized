@@ -1,5 +1,5 @@
-# python get_tts_activations.py SparkTTS --stylized_dir "../dataset/stylized" --neutral_dir "../dataset/original" --transcript_file "../dataset/transcription_results.json" --model_dir "../pretrained_models/Spark-TTS-0.5B"
-# python get_tts_activations.py SparkTTS --stylized_dir "../dataset/testing/stylized_test" --neutral_dir "../dataset/testing/original_test" --transcript_file "../dataset/testing/transcription_results_testing.json" --model_dir "../pretrained_models/Spark-TTS-0.5B"
+# python get_tts_activations.py SparkTTS --stylized_dir "../dataset/training/stylized" --neutral_dir "../dataset/training/original" --transcript_file "../dataset/training/train_transcription_results.json" --model_dir "../pretrained_models/Spark-TTS-0.5B"
+# python get_tts_activations.py SparkTTS --gender_stylized male --gender_neutral female --pitch_stylized low --pitch_neutral high --speed_stylized low --speed_neutral high --transcript_file "../dataset/Mini/test_transcription_results.json" --model_dir "../pretrained_models/Spark-TTS-0.5B"
 import sys
 import os
 # ensure parent folder (project root) is in Python path
@@ -15,6 +15,8 @@ import gc
 from cli.SparkTTS import SparkTTS
 import torch
 from baukit import TraceDict
+from sparktts.utils.token_parser import LEVELS_MAP, GENDER_MAP, TASK_TOKEN_MAP
+
 
 def get_sparktts_activations(model, prompt_ids, device):
 
@@ -35,10 +37,7 @@ def get_sparktts_activations(model, prompt_ids, device):
 
 
 
-
-
-
-def tokenized_speech_dataset(stylized_dir, neutral_dir, transcript_data, model):
+# def tokenized_speech_dataset(stylized_dir, neutral_dir, transcript_data, model):
     """
     Prepare speech datasets for activation extraction with transcripts
     
@@ -77,16 +76,27 @@ def tokenized_speech_dataset(stylized_dir, neutral_dir, transcript_data, model):
         global_token_ids, semantic_token_ids = model.audio_tokenizer.tokenize(str(stylized_file))
         global_tokens = "".join([f"<|bicodec_global_{i}|>" for i in global_token_ids.squeeze()]) # use squeeze() to remove extra dimension of size 1 since only one audio file
         semantic_tokens = "".join([f"<|bicodec_semantic_{i}|>" for i in semantic_token_ids.squeeze()])
-        
 
         #########################################################这个地方可能需要修改 #########################################################
         # Format prompt for stylized speech with transcript
-        stylized_prompt = (
-            "<|tts|><|start_content|>" + transcript_text + "<|end_content|>"
-            "<|start_global_token|>" + global_tokens + "<|end_global_token|>"
-            "<|start_semantic_token|>" + semantic_tokens
-        )
-        stylized_prompt_ids = model.tokenizer(stylized_prompt, return_tensors='pt').input_ids
+        # stylized_prompt = (
+        #     "<|tts|><|start_content|>" + transcript_text + "<|end_content|>"
+        #     "<|start_global_token|>" + global_tokens + "<|end_global_token|>"
+        #     "<|start_semantic_token|>" + semantic_tokens
+        # )
+        stylized_prompt = [
+                TASK_TOKEN_MAP["tts"],
+                "<|start_content|>",
+                transcript_text,
+                "<|end_content|>",
+                "<|start_global_token|>",
+                global_tokens,
+                "<|end_global_token|>",
+                "<|start_semantic_token|>",
+                semantic_tokens,
+            ]
+        stylized_prompt = "".join(stylized_prompt)
+        stylized_prompt_ids = model.tokenizer([stylized_prompt], return_tensors='pt').input_ids
         all_prompts.append(stylized_prompt_ids)
         all_labels.append(1)  # 1 for stylized
         
@@ -95,23 +105,88 @@ def tokenized_speech_dataset(stylized_dir, neutral_dir, transcript_data, model):
         global_tokens = "".join([f"<|bicodec_global_{i}|>" for i in global_token_ids.squeeze()])
         semantic_tokens = "".join([f"<|bicodec_semantic_{i}|>" for i in semantic_token_ids.squeeze()])
         
-        # for neutral speech, we don't have transcript text
-        neutral_prompt = (
-            "<|tts|><|start_content|>" + transcript_text + "<|end_content|>"
-            "<|start_global_token|>" + global_tokens + "<|end_global_token|>"
-        )
-        neutral_prompt_ids = model.tokenizer(neutral_prompt, return_tensors='pt').input_ids
+        # for neutral speech
+        # neutral_prompt = (
+        #     "<|tts|><|start_content|>" + transcript_text + "<|end_content|>"
+        #     "<|start_global_token|>" + global_tokens + "<|end_global_token|>"
+        #     "<|start_semantic_token|>" + semantic_tokens
+        # )
+
+        neutral_prompt = [
+                TASK_TOKEN_MAP["tts"],
+                "<|start_content|>",
+                transcript_text,
+                "<|end_content|>",
+                "<|start_global_token|>",
+                global_tokens,
+                "<|end_global_token|>",
+                "<|start_semantic_token|>",
+                semantic_tokens,
+            ]
+        neutral_prompt = "".join(neutral_prompt)
+        neutral_prompt_ids = model.tokenizer([neutral_prompt], return_tensors='pt').input_ids
         all_prompts.append(neutral_prompt_ids)
         all_labels.append(0)  # 0 for neutral
     
     return all_prompts, all_labels
+def tokenized_speech_dataset(gender_stylized, gender_neutral, pitch_stylized, pitch_neutral, speed_stylized, speed_neutral, transcript_data, model):
+
+    all_prompts = []
+    all_labels = []
+    # Process each pair
+
+    for filename in transcript_data:
+        transcript_sample = transcript_data[filename]
+        transcript_text = transcript_sample["text"]
+        control_tts_inputs_stylized  = model.process_prompt_control(gender_stylized, pitch_stylized, speed_stylized, transcript_text)
+        control_tts_inputs_neutral  = model.process_prompt_control(gender_neutral, pitch_neutral, speed_neutral, transcript_text)
+
+        stylized_prompt = "".join(control_tts_inputs_stylized)
+        stylized_prompt_ids = model.tokenizer([stylized_prompt], return_tensors='pt').input_ids
+        all_prompts.append(stylized_prompt_ids)
+
+        neutral_prompt = "".join(control_tts_inputs_neutral)
+        neutral_prompt_ids = model.tokenizer([neutral_prompt], return_tensors='pt').input_ids
+        all_prompts.append(neutral_prompt_ids)
+    return all_prompts
+
+def tokenized_speech_dataset(gender_neutral, pitch_neutral, speed_neutral, transcript_data, model):
+
+    all_prompts = []
+    # Process each pair
+
+    for filename in transcript_data:
+        transcript_sample = transcript_data[filename]
+        transcript_text = transcript_sample["text"]
+        control_tts_inputs_neutral  = model.process_prompt_control(gender_neutral, pitch_neutral, speed_neutral, transcript_text)
+
+        neutral_prompt = "".join(control_tts_inputs_neutral)
+        neutral_prompt_ids = model.tokenizer([neutral_prompt], return_tensors='pt').input_ids
+        all_prompts.append(neutral_prompt_ids)
+    return all_prompts
+
+
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model_name', type=str, default='SparkTTS')
-    parser.add_argument('--stylized_dir', type=str, required=True, help='directory with stylized speech files')
-    parser.add_argument('--neutral_dir', type=str, required=True, help='directory with neutral speech files')
+    # parser.add_argument('--stylized_dir', type=str, required=True, help='directory with stylized speech files')
+    # parser.add_argument('--neutral_dir', type=str, required=True, help='directory with neutral speech files')
+    parser.add_argument("--gender_stylized", choices=["male", "female"])
+    parser.add_argument("--gender_neutral", choices=["male", "female"])
+    parser.add_argument(
+        "--pitch_stylized", choices=["very_low", "low", "moderate", "high", "very_high"]
+    )
+    parser.add_argument(
+        "--pitch_neutral", choices=["very_low", "low", "moderate", "high", "very_high"]
+    )
+    parser.add_argument(
+        "--speed_stylized", choices=["very_low", "low", "moderate", "high", "very_high"]
+    )   
+    parser.add_argument(
+        "--speed_neutral", choices=["very_low", "low", "moderate", "high", "very_high"]
+    )   
     parser.add_argument('--transcript_file', type=str, required=True, help='JSON file mapping filenames to transcripts')
     parser.add_argument('--device', type=int, default=0)
     parser.add_argument("--model_dir", type=str, required=True, help='local directory with model data')
@@ -121,8 +196,8 @@ def main():
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
     print(f"Loading SparkTTS model from {args.model_dir}")
     model = SparkTTS(args.model_dir, device)
-    for name, module in model.model.named_modules():
-        print(name)
+    # for name, module in model.model.named_modules():
+    #     print(name)
 
     # sys.exit()
     
@@ -133,9 +208,12 @@ def main():
     
 
     print("Tokenizing speech data")
-    prompts, labels = tokenized_speech_dataset(args.stylized_dir, args.neutral_dir, transcript_data, model)
+    prompts = tokenized_speech_dataset(args.gender_stylized, args.gender_neutral, args.pitch_stylized, args.pitch_neutral, args.speed_stylized, args.speed_neutral, transcript_data, model)
     print(f"Processed {len(prompts)}")
-    
+    # print(prompts[0].shape) # stylized prompt
+    # print(prompts[1].shape) # neutral prompt
+    # print(prompts[2].shape) # stylized prompt
+    # print(prompts[3].shape) # neutral prompt
     # # 打印prompts
     # print(prompts[0].shape) # [1, 249]
     # print(prompts[1].shape) # [1, 55]
@@ -144,7 +222,6 @@ def main():
     # print(labels)
     
 
-    all_layer_wise_activations = []
     all_head_wise_activations = []
 
     print("Getting activations")
@@ -162,9 +239,6 @@ def main():
         gc.collect()
 
     os.makedirs(args.save_dir, exist_ok=True)
-
-    print("Saving labels")
-    np.save(os.path.join(args.save_dir, f'{args.model_name}_labels.npy'), labels)
     
     print("Saving head wise activations")
     np.save(os.path.join(args.save_dir, f'{args.model_name}_head_wise.npy'), all_head_wise_activations)
