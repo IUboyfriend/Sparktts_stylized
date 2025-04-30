@@ -236,7 +236,7 @@ def main():
             correct_activations = activations[::2, :]
             incorrect_activations = activations[1::2, :]
             # print(correct_activations.shape)
-            print(incorrect_activations.shape) # (1132, 64)
+            # print(incorrect_activations.shape) # (1132, 64)
             correct_activations = np.mean(correct_activations, axis=0)
             incorrect_activations = np.mean(incorrect_activations, axis=0)
             # 真正用到的intervention向量在这里计算

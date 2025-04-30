@@ -1,5 +1,4 @@
-# python get_tts_activations.py SparkTTS --stylized_dir "../dataset/training/stylized" --neutral_dir "../dataset/training/original" --transcript_file "../dataset/training/train_transcription_results.json" --model_dir "../pretrained_models/Spark-TTS-0.5B"
-# python get_tts_activations.py SparkTTS --gender_stylized male --gender_neutral female --pitch_stylized low --pitch_neutral high --speed_stylized low --speed_neutral high --transcript_file "../dataset/Mini/test_transcription_results.json" --model_dir "../pretrained_models/Spark-TTS-0.5B"
+# python get_tts_activations.py SparkTTS --gender_stylized male --gender_neutral female --pitch_stylized low --pitch_neutral high --speed_stylized low --speed_neutral high --transcript_file "../dataset/training/train_transcription_results.json" --model_dir "../pretrained_models/Spark-TTS-0.5B"
 import sys
 import os
 # ensure parent folder (project root) is in Python path
@@ -18,26 +17,41 @@ from baukit import TraceDict
 from sparktts.utils.token_parser import LEVELS_MAP, GENDER_MAP, TASK_TOKEN_MAP
 
 
-def get_sparktts_activations(model, prompt_ids, device):
+def get_sparktts_activations(model, prompt_ids, device,tokenizer):
 
     HEADS = [f"model.layers.{i}.self_attn.o_proj" for i in range(model.config.num_hidden_layers)]
     with torch.no_grad():
         prompt = prompt_ids.to(device)
-        with TraceDict(model, HEADS,retain_input=True) as ret:
-            output = model(prompt, output_hidden_states = True)
-        head_wise_hidden_states = [ret[head].input.squeeze().detach().cpu() for head in HEADS] # each is (batch_size, seq_len, num_heads * head_dim)
-        # print(len(head_wise_hidden_states)) 24
-        # print(head_wise_hidden_states[0].shape)
-        # print(head_wise_hidden_states[1].shape) [249, 896]
-        # print(head_wise_hidden_states[2].shape)
-        # print(head_wise_hidden_states[3].shape) 
-        head_wise_hidden_states = torch.stack(head_wise_hidden_states, dim = 0).squeeze().numpy()
-        print(head_wise_hidden_states.shape) # (24, 249, 896)
-    return head_wise_hidden_states 
+        outputs = model.generate(
+            prompt,
+            max_length=600, 
+            do_sample=False,
+            output_hidden_states=True,
+            return_dict_in_generate=True,
+            output_scores=True
+        )
+        
+        # Get the generated sequence as tensor
+        generated_sequence = outputs.sequences
+        print(generated_sequence[0].shape)
+        # Get hidden states for all generated tokens
+        with TraceDict(model, HEADS, retain_input=True) as ret:
+            # Run forward pass with the complete sequence
+            model(generated_sequence, output_hidden_states=True)
+            
+        head_wise_hidden_states = [ret[head].input.squeeze().detach().cpu() for head in HEADS]
+        head_wise_hidden_states = torch.stack(head_wise_hidden_states, dim=0).squeeze().numpy()
+        
+        # If you need to decode the generated sequence
+        # decoded_text = tokenizer.decode(generated_sequence[0], skip_special_tokens=True)
+        # print(generated_sequence[0])
+        # print(f"Generated text: {decoded_text}")
+        
+    return head_wise_hidden_states
 
 
 
-# def tokenized_speech_dataset(stylized_dir, neutral_dir, transcript_data, model):
+
     """
     Prepare speech datasets for activation extraction with transcripts
     
@@ -129,7 +143,8 @@ def get_sparktts_activations(model, prompt_ids, device):
         all_labels.append(0)  # 0 for neutral
     
     return all_prompts, all_labels
-def tokenized_speech_dataset(gender_stylized, gender_neutral, pitch_stylized, pitch_neutral, speed_stylized, speed_neutral, transcript_data, model):
+
+def tokenized_speech_dataset_with_stylized(gender_stylized, gender_neutral, pitch_stylized, pitch_neutral, speed_stylized, speed_neutral, transcript_data, model):
 
     all_prompts = []
     all_labels = []
@@ -208,7 +223,7 @@ def main():
     
 
     print("Tokenizing speech data")
-    prompts = tokenized_speech_dataset(args.gender_stylized, args.gender_neutral, args.pitch_stylized, args.pitch_neutral, args.speed_stylized, args.speed_neutral, transcript_data, model)
+    prompts = tokenized_speech_dataset_with_stylized(gender_stylized = args.gender_stylized, gender_neutral = args.gender_neutral, pitch_stylized = args.pitch_stylized, pitch_neutral = args.pitch_neutral, speed_stylized = args.speed_stylized, speed_neutral = args.speed_neutral, transcript_data = transcript_data, model = model)
     print(f"Processed {len(prompts)}")
     # print(prompts[0].shape) # stylized prompt
     # print(prompts[1].shape) # neutral prompt
@@ -225,13 +240,20 @@ def main():
     all_head_wise_activations = []
 
     print("Getting activations")
+    tokenizer = model.tokenizer
     Qwen = model.model
+    count = 0
     for prompt in tqdm(prompts):
-        head_wise_activations = get_sparktts_activations(Qwen, prompt, device)
-        
+        if count == 200:
+            break
+        else:
+            count+=1
+        head_wise_activations = get_sparktts_activations(Qwen, prompt, device, tokenizer)
+        print(head_wise_activations.shape)
         # Get activations for the last token
         head_wise_activations_wanted = head_wise_activations[:,-1,:].copy()
-        
+
+        # print(head_wise_activations_wanted.shape)
         # Free memory
         del head_wise_activations
         all_head_wise_activations.append(head_wise_activations_wanted)

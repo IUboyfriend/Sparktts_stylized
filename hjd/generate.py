@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from cli.SparkTTS import SparkTTS
 from hjd.get_tts_activations import tokenized_speech_dataset
 import soundfile as sf
+import re
 
 # global variables to share across functions
 SRC_ACTIVATIONS = None  # source activations, shape: [num_samples, num_layers, num_heads, head_dim]
@@ -36,6 +37,7 @@ def parse_args():
     parser.add_argument(
         "--speed_neutral", choices=["very_low", "low", "moderate", "high", "very_high"],default="high"
     )   
+    parser.add_argument("--output_folder", type=str, default="generated_audio_method_1", help="Folder to save generated audio files")
     # parser.add_argument("--save_dir", type=str, required=True)
     # # rank selection
     rank_group = parser.add_mutually_exclusive_group()
@@ -118,7 +120,7 @@ def svd_decomposition(rank=None, adaRank=False, var_threshold=None):
             SS_PROJ_TGT_MEAN_ACT[(layer_idx, head_idx)] = torch.mean(proj_tgt_activations, dim=0)
             # print(SS_PROJ_SRC_MEAN_ACT[(layer_idx, head_idx)].shape) # [64]
 
-def get_steering_vector(layer_idx, head_idx, cur_activations, beta=3.0):  # FIXME: beta is hard-coded
+def get_steering_vector(layer_idx, head_idx, cur_activations, beta=0.80):  # FIXME: beta is hard-coded
     # read from global variables
     rank = SS_RANK[(layer_idx, head_idx)]
     Vh = SS_VH[(layer_idx, head_idx)][:rank, :]
@@ -234,7 +236,7 @@ def generate_fast(model, question_tokens, qa_prefix_tokens, max_length=600):
             # collect answer token ids
             answer_token_ids.append(token.cpu().numpy()[0][0])
 
-            if token.cpu().numpy()[0][0] == 151643 or token.cpu().numpy()[0][0] == 151644 or token.cpu().numpy()[0][0] == 151645: 
+            if token.cpu().numpy()[0][0] == 151643 or token.cpu().numpy()[0][0] == 151644 or token.cpu().numpy()[0][0] == 151645: # 正常生成到151645停
                 break
 
     return answer_token_ids
@@ -321,7 +323,13 @@ def main(args):
         
     print("Loading/Processing dataset...")
 
-    prompts = tokenized_speech_dataset(args.gender_neutral, args.pitch_neutral, args.speed_neutral, transcript_data, model)
+    prompts = tokenized_speech_dataset(
+        gender_neutral=args.gender_neutral,
+        pitch_neutral=args.pitch_neutral,
+        speed_neutral=args.speed_neutral,
+        transcript_data=transcript_data,
+        model=model
+    )
     print(f"Processed {len(prompts)} prompts")
 
 
@@ -380,20 +388,13 @@ def main(args):
     cum_token = 0
     answers = []
 
-    
+    # Create output directory
+    os.makedirs(args.output_folder, exist_ok=True)
     
     
     prompts_neutral = tokenized_speech_dataset(args.gender_neutral, args.pitch_neutral, args.speed_neutral, transcript_data, large_model)
-
+    count = 0
     for index, sample_neutral in enumerate(prompts_neutral):
-
-        # # question is the the questions itself, qa_prefix is the question with the qa template
-        # question = sample
-        # # FIXME: temporary template
-        # # qa_prefix = format_func(question, "")
-        # qa_prefix = "请你对下面的语句作出回应：\n" + question + "\n好的，我的回答如下：\n"
-        # question_tokens = tokenizer(question, return_tensors='pt').input_ids.to(model.device)
-        # qa_prefix_tokens = tokenizer(qa_prefix, return_tensors='pt').input_ids.to(model.device)
 
         #########################################################这个地方可能需要修改 #########################################################
     
@@ -404,24 +405,41 @@ def main(args):
         print(response)
         
 
-        # time_cost = time.time() - tik
-        # cum_time += time_cost
-        # cum_token += len(response)
+        time_cost = time.time() - tik
+        cum_time += time_cost
+        cum_token += len(response)
 
 
-    
-        # answer = audio_tokenizer.detokenize()
-        #    = tokenizer.detokenize(global_tokens.squeeze(0), semantic_tokens)
-        # print(index, answer)
-        # answers.append(answer)
+    # Extract semantic token IDs from the generated text
+        pred_semantic_ids = (
+            torch.tensor([int(token) for token in re.findall(r"bicodec_semantic_(\d+)", response)])
+            .long()
+            .unsqueeze(0)
+        )
+
+        global_token_ids = (
+                torch.tensor([int(token) for token in re.findall(r"bicodec_global_(\d+)", response)])
+                .long()
+                .unsqueeze(0)
+                .unsqueeze(0)
+            )
+
+        wav = audio_tokenizer.detokenize(
+            global_token_ids.to(device).squeeze(0),
+            pred_semantic_ids.to(device),
+        )
+
+        
+        count += 1
+        # Get the filename from transcript_data
+        filename = list(transcript_data.keys())[index]
+        # Clean filename to make it safe for filesystem
+        safe_filename = ''.join(c for c in filename if c.isalnum() or c in '._- ')
+        # Save with original filename in specified output folder
+        sf.write(os.path.join(args.output_folder, f"stylized_{safe_filename}"), wav, 16000)
 
       
 
-    # filenames = list(transcript_data.keys())
-    # # save answer peech to a wav file
-    # for i in range(len(answers)):
-    #     filename = filenames[i]
-    #     sf.write(f"stylized_{transcript_data[filename]['text']}.wav", answers[i], 16000)
 
     
 
@@ -472,5 +490,5 @@ if __name__ == "__main__":
 
 
 
-# python generate.py --model_dir "../pretrained_models/Spark-TTS-0.5B" --activations_path "activations/SparkTTS_head_wise.npy" --test_folder "../dataset/Mini" --selected_heads_path "edited_weights/top_heads_64_3.0.npy" --rank 64 --generation_method "baseline" 
+# python generate.py --model_dir "../pretrained_models/Spark-TTS-0.5B" --activations_path "activations/SparkTTS_head_wise.npy" --test_folder "../dataset/last100_data" --selected_heads_path "edited_weights/top_heads_64_3.0.npy" --rank 64 --generation_method "baseline" 
 
