@@ -708,7 +708,7 @@ def train_probes(seed, train_set_idxs, val_set_idxs, separated_head_wise_activat
             X_val = all_X_val[:,layer,head,:]
     
             # clf = LogisticRegression(random_state=seed, max_iter=1000,C=1e-8).fit(X_train, y_train)
-            clf = LogisticRegression(random_state=seed, max_iter=1000, penalty='l1', solver='liblinear').fit(X_train, y_train)
+            clf = LogisticRegression(random_state=seed, max_iter=1000, penalty='l1', solver='liblinear',C = 3e-1).fit(X_train, y_train)
             y_pred = clf.predict(X_train)
             y_val_pred = clf.predict(X_val)
             all_head_accs.append(accuracy_score(y_val, y_val_pred))
@@ -726,7 +726,7 @@ def get_top_heads(train_idxs, val_idxs, separated_activations, separated_labels,
     top_heads = []
 
     top_accs = np.argsort(all_head_accs_np.reshape(num_heads*num_layers))[::-1][:num_to_intervene]
-    print(all_head_accs_np)
+    # print(all_head_accs_np)
     # print(top_accs)
     
     top_heads = [flattened_idx_to_layer_head(idx, num_heads) for idx in top_accs]

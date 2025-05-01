@@ -179,3 +179,6 @@ example/
 hjd/edited_weights/
 hjd/activations/
 ttseval/
+generated_audio_method_2
+hjd/edited_weights_global/
+hjd/edited_weights_semantic/

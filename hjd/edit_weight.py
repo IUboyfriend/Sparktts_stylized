@@ -1,4 +1,5 @@
-# python edit_weight.py --model_name Qwen2.5-0.5B --activation_path "activations/SparkTTS_head_wise.npy" --model_dir "../pretrained_models/Spark-TTS-0.5B" --num_heads 64 --alpha 3 --save_dir "edited_weights/" --selection_method "linear_probing"
+# python edit_weight.py --model_name Qwen2.5-0.5B --activation_path "activations_v2/SparkTTS_head_wise_semantic.npy" --model_dir "../pretrained_models/Spark-TTS-0.5B" --num_heads 40 --alpha 3 --save_dir "edited_weights_semantic/" --selection_method "linear_probing" 
+# python edit_weight.py --model_name Qwen2.5-0.5B --activation_path "activations_v2/SparkTTS_head_wise_global.npy" --model_dir "../pretrained_models/Spark-TTS-0.5B" --num_heads 192 --alpha 3 --save_dir "edited_weights_global/" --selection_method "linear_probing" 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -209,20 +210,20 @@ def main():
                                                   epsilon=1e-9)
 
     os.makedirs(args.save_dir, exist_ok=True)
-    np.save(os.path.join(args.save_dir, f'probes_{args.num_heads}_{args.alpha:.1f}.npy'),probes)
+    # np.save(os.path.join(args.save_dir, f'probes_{args.num_heads}_{args.alpha:.1f}.npy'),probes)
     # print(top_heads)
     np.save(os.path.join(args.save_dir, f'top_heads_{args.num_heads}_{args.alpha:.1f}.npy'),top_heads)
 
     # 这里的interventions中得到的intervention向量实际上没有用到, only used for recording the selected heads
     interventions = get_interventions_dict(top_heads, probes, tuning_activations, num_heads, args.use_center_of_mass, args.use_random_dir, com_directions)
-    print(interventions)
+    # print(interventions)
     # print selected layers and heads
-    for intervention in sorted(interventions.keys(), key=lambda x: int(x.split('.')[2])):
-        print(intervention)
-        print([
-            head_no
-            for head_no, _, _ in interventions[intervention]
-        ])
+    # for intervention in sorted(interventions.keys(), key=lambda x: int(x.split('.')[2])):
+    #     print(intervention)
+    #     print([
+    #         head_no
+    #         for head_no, _, _ in interventions[intervention]
+    #     ])
 
     activations_dict = {} # save
     for head_out_name, list_int_vec in tqdm(interventions.items()):
@@ -249,18 +250,18 @@ def main():
         # FIXME: 原本的o_proj.bias中，没有被选中的heads的bias被覆盖为0; 还是说本身就为零？
         bias_tobe = F.linear(displacement.to(torch.float32), model.model.layers[layer_no].self_attn.o_proj.weight).to(device)
         model.model.layers[layer_no].self_attn.o_proj.bias = torch.nn.parameter.Parameter(bias_tobe)
-    with open(os.path.join(args.save_dir, f'activations_{args.num_heads}_{args.alpha:.1f}.pkl'), 'wb') as f:
-        pickle.dump(activations_dict, f)
+    # with open(os.path.join(args.save_dir, f'activations_{args.num_heads}_{args.alpha:.1f}.pkl'), 'wb') as f:
+    #     pickle.dump(activations_dict, f)
 
-    print("saving model with edited weights")
-    save_folder = os.path.join(args.save_dir, f'{args.model_name}_seed_{args.seed}_top_{args.num_heads}_heads_alpha_{args.alpha:.1f}')
-    if os.path.exists(save_folder):
-      shutil.rmtree(save_folder)
-    os.makedirs(save_folder)
-    print("saving model to", save_folder)
-    model.config.oproj_bias = True
-    model.save_pretrained(save_folder, safe_serialization=False, max_shard_size="10GB")
-    tokenizer.save_pretrained(save_folder)
+    # print("saving model with edited weights")
+    # save_folder = os.path.join(args.save_dir, f'{args.model_name}_seed_{args.seed}_top_{args.num_heads}_heads_alpha_{args.alpha:.1f}')
+    # if os.path.exists(save_folder):
+    #   shutil.rmtree(save_folder)
+    # os.makedirs(save_folder)
+    # print("saving model to", save_folder)
+    # model.config.oproj_bias = True
+    # model.save_pretrained(save_folder, safe_serialization=False, max_shard_size="10GB")
+    # tokenizer.save_pretrained(save_folder)
 
 
 if __name__ == "__main__":
